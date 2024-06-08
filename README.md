@@ -27,4 +27,4 @@ https://github.com/FuzzySecurity/afl-frida-build/assets/10997340/1b21a19a-e18a-4
 
 You can read this post to understand more about where this need comes from.
 
-- Fuzzing Redux, leveraging AFL++ Frida-Mode on Android native libraries - [here](#)
+- Fuzzing Redux, leveraging AFL++ Frida-Mode on Android native libraries - [here](https://knifecoat.com/Posts/Fuzzing+Redux%2C+leveraging+AFL%2B%2B+Frida-Mode+on+Android+native+libraries)
