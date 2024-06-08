@@ -1,0 +1,103 @@
+---
+- name: AFL++ Frida-Mode MAC ARM64 Build
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    ANDROID_PLATFORM: 31 # Platform version to build for
+    AFL_TAG: "latest"    # Use "latest" or set to specific tag (e.g. "v4.08c")
+  
+  tasks:
+    - name: Register OS Family and Architecture
+      set_fact:
+        os_family: "{{ ansible_facts['os_family'] }}"
+        os_arch: "{{ ansible_architecture }}"
+      tags: [ 'always' ]
+    
+    - name: Check if OS and architecture are supported
+      fail:
+        msg: "Unsupported OS or architecture"
+      when: os_family != 'Darwin' or os_arch != 'arm64'
+      tags: [ 'always' ]
+    
+    - name: Get the latest release tag from AFL++ GitHub
+      uri:
+        url: https://api.github.com/repos/AFLplusplus/AFLplusplus/releases/latest
+        return_content: yes
+      register: latest_release
+      when: AFL_TAG == 'latest'
+    
+    - name: Parse the latest release tag or use specific tag
+      set_fact:
+        latest_tag: "{{ AFL_TAG if AFL_TAG != 'latest' else latest_release.json.tag_name }}"
+    
+    - name: Download identified AFL++ release
+      get_url:
+        url: "https://github.com/AFLplusplus/AFLplusplus/archive/refs/tags/{{ latest_tag }}.zip"
+        dest: "{{ ansible_env.PWD }}/aflplusplus.zip"
+    
+    - name: Unzip AFL++
+      unarchive:
+        src: "{{ ansible_env.PWD }}/aflplusplus.zip"
+        dest: "{{ ansible_env.PWD }}"
+        remote_src: yes
+    
+    - name: Rename the AFL++ directory
+      shell: mv {{ ansible_env.PWD }}/AFLplusplus-* {{ ansible_env.PWD }}/afl-src
+    
+    - name: Delete the AFL++ zip file
+      file:
+        path: "{{ ansible_env.PWD }}/aflplusplus.zip"
+        state: absent
+    
+    - name: Install or ensure NDK is up-to-date
+      homebrew:
+        name: android-ndk
+        state: latest
+    
+    - name: Set NDK path variable
+      set_fact:
+        ndk_path: "/opt/homebrew/share/android-ndk"
+    
+    - name: Copy CMakeLists to AFL++ source directory
+      copy:
+        src: CMakeLists.txt
+        dest: "{{ ansible_env.PWD }}/afl-src/CMakeLists.txt"
+    
+    - name: Run the build script
+      shell: |
+        mkdir {{ ansible_env.PWD }}/build && cd {{ ansible_env.PWD }}/build
+        cmake -DANDROID_PLATFORM={{ ANDROID_PLATFORM }} \
+        -DCMAKE_TOOLCHAIN_FILE={{ ndk_path }}/build/cmake/android.toolchain.cmake \
+        -DANDROID_ABI=arm64-v8a ../afl-src
+        make
+    
+    - name: Copy files to current directory
+      shell: mv {{ ansible_env.PWD }}/build/afl-* {{ ansible_env.PWD }}
+    
+    - name: Delete the build directory
+      file:
+        path: "{{ ansible_env.PWD }}/build"
+        state: absent
+    
+    - name: Delete the AFL++ source directory
+      file:
+        path: "{{ ansible_env.PWD }}/afl-src"
+        state: absent
+    
+    - name: Find latest arm64 lldb-server in local NDK
+      shell: find /opt/homebrew/share/android-ndk/ -type f -name 'lldb-server' | sed 's|//|/|g' | grep aarch64 | awk -F/ '!seen[$NF]++'
+      register: lldb_server_path
+    
+    - name: Copy lldb-server to current directory
+      shell: cp {{ lldb_server_path.stdout_lines[0] }} {{ ansible_env.PWD }}/aarch64-lldb-server
+    
+    - name: Write build log to file
+      shell: |
+        echo "\n[[Runtime Build Information]]\n\n" \
+        "+ Android Platform: {{ ANDROID_PLATFORM }}\n" \
+        "+ AFL++ tag built: {{ latest_tag }}\n" \
+        "+ Source path lldb-server: {{ lldb_server_path.stdout_lines[0] }}\n" \
+        "+ Build Command:\n     mkdir {{ ansible_env.PWD }}/build && cd {{ ansible_env.PWD }}/build\n" \
+        "    cmake -DANDROID_PLATFORM={{ ANDROID_PLATFORM }} \\ \n" \
+        "    -DCMAKE_TOOLCHAIN_FILE={{ ndk_path }}/build/cmake/android.toolchain.cmake \\ \n" \
+        "    -DANDROID_ABI=arm64-v8a ../afl-src\n     make\n" > {{ ansible_env.PWD }}/build_log.txt
